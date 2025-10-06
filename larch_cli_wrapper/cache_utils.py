@@ -17,13 +17,16 @@ def get_structure_hash(atoms: Atoms) -> str:
 
 
 def get_cache_key(atoms: Atoms, absorber: str, config: Any) -> str:
-    """Generate a cache key for given structure, absorber, and configuration."""
+    """Generate a cache key based only on FEFF calculation parameters.
+
+    This excludes analysis parameters (kmin, kmax, kweight, etc.) so that
+    changing analysis settings doesn't invalidate FEFF calculation cache.
+    """
     structure_hash = get_structure_hash(atoms)
-    config_str = (
-        f"{config.spectrum_type}_{config.edge}_{config.radius}_"
-        f"{config.kmin}_{config.kmax}_{config.kweight}_{config.window}_{config.dk}"
-    )
-    config_hash = hashlib.md5(config_str.encode()).hexdigest()[:16]  # noqa: S324
+    # Use the feff_params property to get only FEFF calculation relevant parameters
+    feff_params = config.feff_params
+    feff_config_str = "_".join(str(v) for v in feff_params.values())
+    config_hash = hashlib.md5(feff_config_str.encode()).hexdigest()[:16]  # noqa: S324
     return f"{structure_hash}_{absorber}_{config_hash}"
 
 
@@ -41,8 +44,8 @@ def load_from_cache(
         Tuple of (chi, k) arrays if cache hit, None if cache miss or error
 
     Note:
-        The returned arrays are typically numpy arrays or lists of floats
-        representing the EXAFS chi(k) data and k-space values.
+        The returned chi array is complex (EXAFS chi(k) data) and k array
+        is real-valued k-space values.
     """
     if not cache_dir:
         return None
@@ -72,13 +75,13 @@ def save_to_cache(
 
     Args:
         cache_key: Unique identifier for the cached data
-        chi: EXAFS chi(k) data (typically numpy array or list of floats)
-        k: k-space values (typically numpy array or list of floats)
+        chi: EXAFS chi(k) data (complex numpy array)
+        k: k-space values (real numpy array)
         cache_dir: Directory where cache files are stored
 
     Note:
-        Silently continues on cache write failures with a warning.
-        The chi and k parameters should be serializable numeric data.
+        Always stores complex chi data directly. Silently continues on cache
+        write failures with a warning.
     """
     if not cache_dir:
         return
