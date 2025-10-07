@@ -253,12 +253,13 @@ class TestCLICommands:
             mock_processor = Mock()
             mock_batch = Mock()
 
-            # Create proper mock tasks with Path-like feff_dir under output directory
+            # Create proper mock tasks with frame_XXXX/site_XXXX structure
             mock_task1 = Mock()
-            mock_task1.feff_dir = Path("feff_inputs/site_0000")
+            mock_task1.feff_dir = Path("feff_inputs/frame_0000/site_0000")
             mock_task2 = Mock()
-            mock_task2.feff_dir = Path("feff_inputs/site_0001")
+            mock_task2.feff_dir = Path("feff_inputs/frame_0000/site_0001")
             mock_batch.tasks = [mock_task1, mock_task2]
+            mock_batch.get_tasks_by_frame.return_value = {0: [mock_task1, mock_task2]}
 
             mock_processor.input_generator.generate_single_site_inputs.return_value = (
                 mock_batch
@@ -296,8 +297,9 @@ class TestCLICommands:
             mock_processor = Mock()
             mock_batch = Mock()
             mock_task = Mock()
-            mock_task.feff_dir = Path("feff_inputs/site_0000")
+            mock_task.feff_dir = Path("feff_inputs/frame_0000/site_0000")
             mock_batch.tasks = [mock_task]
+            mock_batch.get_tasks_by_frame.return_value = {0: [mock_task]}
             mock_processor.input_generator.generate_single_site_inputs.return_value = (
                 mock_batch
             )
