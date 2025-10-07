@@ -368,8 +368,10 @@ def generate_feff_inputs(
         None,
         "--ase-kwargs",
         help=(
-            'JSON string of ASE read kwargs. Examples: \'{"index":":"}\' (all frames), '
-            '\'{"index":"0:10"}\' (frames 0-9), \'{"format":"vasp"}\' (force format)'
+            "JSON string of ASE read kwargs. Examples: "
+            '\'{"index":":"}\' (all frames), '
+            '\'{"index":"::10"}\' (every 10th frame), '
+            '\'{"format":"vasp"}\' (force format)'
         ),
     ),
 ) -> None:
@@ -386,7 +388,7 @@ def generate_feff_inputs(
     Use --ase-kwargs to pass additional arguments to ase.io.read():
     - '{"index": ":"}' to read all frames
     - '{"index": "0:10"}' to read first 10 frames
-    - '{"index": [0, 5, 10]}' to read specific frames
+    - '{"index": "::10"}' Every 10th frame
     - Other ASE read kwargs like format, parallel, etc.
     """
     if not structure.exists():
@@ -966,6 +968,23 @@ def run_full_pipeline(
     all_sites: bool = typer.Option(
         False, "--all-sites", help="Process all sites of the given element"
     ),
+    all_frames: bool = typer.Option(
+        False,
+        "--all-frames",
+        "--trajectory",
+        "-t",
+        help="Process all frames in trajectory",
+    ),
+    ase_read_kwargs: str | None = typer.Option(
+        None,
+        "--ase-kwargs",
+        help=(
+            "JSON string of ASE read kwargs. Examples: "
+            '\'{"index":":"}\' (all frames), '
+            '\'{"index":"::10"}\' (every 10th frame), '
+            '\'{"format":"vasp"}\' (force format)'
+        ),
+    ),
     show_plot: bool = typer.Option(False, "--show", help="Display plots interactively"),
     plot_style: str = typer.Option(
         "publication",
@@ -1050,6 +1069,12 @@ def run_full_pipeline(
     - Combined format (e.g., 'Fe:0,1') - specific sites of given element
 
     Use --all-sites with element symbol to process all matching sites.
+    Use --all-frames to process all frames in trajectory.
+    Use --ase-kwargs to pass additional arguments to ase.io.read():
+    - '{"index": ":"}' to read all frames
+    - '{"index": "0:10"}' to read first 10 frames
+    - '{"index": "::10"}' Every 10th frame
+    - Other ASE read kwargs like format, parallel, etc.
 
     Plot components:
     - 'individual': Plot individual spectra (before averaging)
@@ -1092,24 +1117,29 @@ def run_full_pipeline(
             cleanup=cleanup,
         )
 
-        atoms = ase_read(str(structure), ":")
+        # Parse ASE read kwargs if provided
+        read_kwargs = {"index": ":"} if all_frames else {"index": -1}
+        if ase_read_kwargs:
+            import json
+
+            try:
+                read_kwargs = json.loads(ase_read_kwargs)
+                console.print(f"[dim]Using ASE read kwargs: {read_kwargs}[/dim]")
+            except json.JSONDecodeError as e:
+                console.print(f"[red]Error: Invalid JSON in --ase-kwargs: {e}[/red]")
+                raise typer.Exit(1) from e
+
+        # Load structures based on trajectory flag and kwargs
+        atoms = ase_read(str(structure), **read_kwargs)
+        if not isinstance(atoms, list):
+            atoms = [atoms]
+        structures = atoms
+        console.print(f"[dim]Loaded {len(structures)} frames from file[/dim]")
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Check if atoms is a single structure or a list (trajectory)
-        if isinstance(atoms, list):
-            # Trajectory case
-            structures = atoms
-            # Use first structure for absorber parsing
-            reference_atoms = structures[0]
-        else:
-            # Single structure case
-            structures = [atoms]
-            reference_atoms = atoms
-
-        # Parse absorber specification using reference structure
-        absorber_spec = parse_absorber_specification(
-            absorber, reference_atoms, all_sites
-        )
+        # Use first structure for absorber parsing
+        # Note this assumes that the indices are valid for all frames!
+        absorber_spec = parse_absorber_specification(absorber, structures[0], all_sites)
 
         console.print(
             f"[cyan]Running full EXAFS pipeline for "

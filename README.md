@@ -124,6 +124,9 @@ larch-cli pipeline structure.cif Fe --all-sites --kmax 15 --radius 8.0
 # Process trajectory with parallel execution
 larch-cli pipeline trajectory.xyz Fe --all-frames --parallel --workers 4
 
+# Sample every 5th frame in a trajectory
+larch-cli pipeline trajectory.xyz Fe --ase-kwargs '{"index": "::5"}'
+
 # Publication-quality processing with custom output
 larch-cli pipeline structure.cif Fe --preset publication --output results/ --style publication
 ```
