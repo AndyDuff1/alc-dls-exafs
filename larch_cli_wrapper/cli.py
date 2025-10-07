@@ -440,7 +440,7 @@ def generate_feff_inputs(
             # Generate inputs for all frames (trajectory mode)
             console.print(
                 f"[cyan]Processing trajectory: {len(structures)} frames × "
-                f"{len(absorber_spec['sites'])} sites...[/cyan]"
+                f"{len(absorber_spec['absorber'])} sites...[/cyan]"
             )
 
             batch = processor.input_generator.generate_trajectory_inputs(
@@ -448,42 +448,41 @@ def generate_feff_inputs(
                 absorber=absorber_spec["absorber"],
                 output_dir=output_dir,
             )
-
-            console.print(
-                f"[green]✓ Generated {len(batch.tasks)} FEFF input files[/green]"
-            )
-            console.print(f"  {len(structures)} frames")
-
-            # Count sites per frame
-            sites_per_frame = len(batch.get_tasks_by_frame()[0]) if batch.tasks else 0
-            console.print(f"  {sites_per_frame} sites per frame")
-            console.print(f"  Output structure: {output_dir}/frame_XXXX/site_XXXX/")
-
-            # Show some example directories
-            frame_dirs = {
-                task.feff_dir.parent for task in batch.tasks[:6]
-            }  # Show first few
-            for frame_dir in sorted(frame_dirs):
-                console.print(f"    {frame_dir.relative_to(output_dir)}/")
-            if len(batch.tasks) > 6:
-                console.print(f"    ... and {len(batch.tasks) - 6} more")
-
         else:
-            # Generate inputs for single structure
+            # Generate inputs for single structure (or single frame with multiple sites)
             batch = processor.input_generator.generate_single_site_inputs(
                 structure=structures[0],
                 absorber=absorber_spec["absorber"],
                 output_dir=output_dir,
             )
 
-            console.print(
-                f"[green]✓ Generated {len(batch.tasks)} FEFF input files[/green]"
+        console.print(f"[green]✓ Generated {len(batch.tasks)} FEFF input files[/green]")
+
+        # Determine structure from tasks
+        if batch.tasks:
+            # Count unique frames and sites
+            frames_by_index = batch.get_tasks_by_frame()
+            num_frames = len(frames_by_index)
+            num_sites = (
+                len(batch.tasks) // num_frames if num_frames > 0 else len(batch.tasks)
             )
 
-            # Show directories created
-            for task in batch.tasks:
-                console.print(f"  {task.feff_dir.relative_to(output_dir)}/")
-                console.print(f"    Check {task.feff_dir / 'feff.inp'} for details")
+            console.print(f"  Output directory: {output_dir}")
+
+            if num_frames > 1:
+                console.print(f"  {num_frames} frames × {num_sites} sites")
+            else:
+                console.print(f"  {num_sites} sites")
+
+            # Show example directories (full frame_XXXX/site_XXXX paths)
+            example_dirs = [
+                f"{task.feff_dir.parent.name}/{task.feff_dir.name}"
+                for task in batch.tasks[: min(5, len(batch.tasks))]
+            ]
+            if example_dirs:
+                console.print(f"  Examples: {', '.join(example_dirs)}")
+            if len(batch.tasks) > 5:
+                console.print(f"  ... and {len(batch.tasks) - 5} more")
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
