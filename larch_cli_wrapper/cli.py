@@ -368,8 +368,10 @@ def generate_feff_inputs(
         None,
         "--ase-kwargs",
         help=(
-            'JSON string of ASE read kwargs. Examples: \'{"index":":"}\' (all frames), '
-            '\'{"index":"0:10"}\' (frames 0-9), \'{"format":"vasp"}\' (force format)'
+            "JSON string of ASE read kwargs. Examples: "
+            '\'{"index":":"}\' (all frames), '
+            '\'{"index":"::10"}\' (every 10th frame), '
+            '\'{"format":"vasp"}\' (force format)'
         ),
     ),
 ) -> None:
@@ -386,7 +388,7 @@ def generate_feff_inputs(
     Use --ase-kwargs to pass additional arguments to ase.io.read():
     - '{"index": ":"}' to read all frames
     - '{"index": "0:10"}' to read first 10 frames
-    - '{"index": [0, 5, 10]}' to read specific frames
+    - '{"index": "::10"}' Every 10th frame
     - Other ASE read kwargs like format, parallel, etc.
     """
     if not structure.exists():
@@ -977,8 +979,10 @@ def run_full_pipeline(
         None,
         "--ase-kwargs",
         help=(
-            'JSON string of ASE read kwargs. Examples: \'{"index":":"}\' (all frames), '
-            '\'{"index":"0:10"}\' (frames 0-9), \'{"format":"vasp"}\' (force format)'
+            "JSON string of ASE read kwargs. Examples: "
+            '\'{"index":":"}\' (all frames), '
+            '\'{"index":"::10"}\' (every 10th frame), '
+            '\'{"format":"vasp"}\' (force format)'
         ),
     ),
     show_plot: bool = typer.Option(False, "--show", help="Display plots interactively"),
@@ -1069,7 +1073,7 @@ def run_full_pipeline(
     Use --ase-kwargs to pass additional arguments to ase.io.read():
     - '{"index": ":"}' to read all frames
     - '{"index": "0:10"}' to read first 10 frames
-    - '{"index": [0, 5, 10]}' to read specific frames
+    - '{"index": "::10"}' Every 10th frame
     - Other ASE read kwargs like format, parallel, etc.
 
     Plot components:
