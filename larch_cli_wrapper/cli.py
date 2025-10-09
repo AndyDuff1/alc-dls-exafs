@@ -422,6 +422,10 @@ def generate_feff_inputs(
             structures = [structures]
         console.print(f"[dim]Loaded {len(structures)} frames from file[/dim]")
 
+        # Resolve output_dir to absolute path immediately
+        # to avoid issues with CWD changes
+        output_dir = output_dir.resolve()
+
         # Parse absorber specification using first structure as reference
         # Note this assumes that the indices are valid for all frames!
         absorber_spec = parse_absorber_specification(absorber, structures[0], all_sites)
@@ -755,6 +759,10 @@ def analyze_feff_outputs(
             nfft=nfft,
             kstep=kstep,
         )
+
+        # Resolve output_dir to absolute path
+        # immediately to avoid issues with CWD changes
+        output_dir = output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         console.print(
@@ -1135,6 +1143,10 @@ def run_full_pipeline(
             atoms = [atoms]
         structures = atoms
         console.print(f"[dim]Loaded {len(structures)} frames from file[/dim]")
+
+        # Resolve output_dir to absolute path
+        # immediately to avoid issues with CWD changes
+        output_dir = output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Use first structure for absorber parsing
