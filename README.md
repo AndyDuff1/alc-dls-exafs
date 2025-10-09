@@ -164,31 +164,50 @@ larch-cli analyze outputs/ --plot-mode sites --kweight 3
 
 ### Configuration Files
 
-Use YAML configuration files for complex setups:
+Use presets or create custom YAML configs. Priority: **Built-in defaults** < **Preset/Config** < **CLI options**.
 
-```yaml
-# config.yaml
-spectrum_type: "EXAFS"
-edge: "K"
-radius: 8.0
-kmin: 2.0
-kmax: 14.0
-kweight: 2
-method: "auto"
-parallel: true
-n_workers: 4
-
-user_tag_settings:
-  S02: "1.0"
-  CONTROL: "1 1 1 1 1 1"
-  NLEG: "6"
-```
-
-You can create a `config.yaml` file in your working directory to customize the pipeline settings. You can then use this by setting the `--config` option when running the CLI commands. For example:
-
+**Generate config from preset:**
 ```bash
-larch-cli pipeline structure.cif Fe --config config.yaml
+larch-cli config-example --output my_config.yaml --preset publication
 ```
+
+**Example config (my_config.yaml):**
+```yaml
+spectrum_type: EXAFS
+edge: K
+radius: 8.0
+
+# FEFF cards
+control: "1 1 1 1 1 1"
+s02: 0.0
+scf: "4.5 0 30 .2 1"
+exchange: 0
+
+# Fourier Transform
+kmin: 3
+kmax: 18
+kweight: 2
+dk: 4.0
+window: hanning
+
+# Processing
+parallel: true
+n_workers: null
+```
+
+**Use config file or preset, override with CLI options:**
+```bash
+# Use config file
+larch-cli pipeline structure.cif Fe --config my_config.yaml
+
+# Use preset
+larch-cli pipeline structure.cif Fe --preset quick
+
+# Override specific parameters
+larch-cli pipeline structure.cif Fe --preset quick --radius 6.0 --kmax 16
+```
+
+**Available presets:** `quick` (fast), `nscf` (no SCF), `publication` (high-quality)
 
 ## Dependencies
 
