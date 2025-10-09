@@ -16,20 +16,6 @@ def get_structure_hash(atoms: Atoms) -> str:
     ).hexdigest()[:16]
 
 
-def get_cache_key(atoms: Atoms, absorber: str, config: Any) -> str:
-    """Generate a cache key based only on FEFF calculation parameters.
-
-    This excludes analysis parameters (kmin, kmax, kweight, etc.) so that
-    changing analysis settings doesn't invalidate FEFF calculation cache.
-    """
-    structure_hash = get_structure_hash(atoms)
-    # Use the feff_params property to get only FEFF calculation relevant parameters
-    feff_params = config.feff_params
-    feff_config_str = "_".join(str(v) for v in feff_params.values())
-    config_hash = hashlib.md5(feff_config_str.encode()).hexdigest()[:16]  # noqa: S324
-    return f"{structure_hash}_{absorber}_{config_hash}"
-
-
 def load_from_cache(
     cache_key: str, cache_dir: str | Path | None, force_recalculate: bool = False
 ) -> tuple[Any, Any] | None:
