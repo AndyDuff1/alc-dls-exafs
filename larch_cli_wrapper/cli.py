@@ -1408,43 +1408,35 @@ def create_config_example(
         "publication", "--preset", "-p", help=f"Base preset: {list(PRESETS.keys())}"
     ),
 ) -> None:
-    """Create an example configuration file."""
+    """Create an example configuration file by copying a preset.
+
+    This copies the preset YAML file to your specified location,
+    which you can then customize for your specific needs.
+    """
     if preset not in PRESETS:
         console.print(f"[red]Error: Unknown preset '{preset}'[/red]")
+        console.print(f"[dim]Available presets: {', '.join(PRESETS.keys())}[/dim]")
         raise typer.Exit(1)
 
     try:
-        config = FeffConfig.from_preset(preset)
-        yaml_content = f"""# EXAFS Configuration (based on '{preset}' preset)
-spectrum_type: {config.spectrum_type}
-edge: {config.edge}
-radius: {config.radius}
+        # Get the preset YAML file path
+        preset_dir = Path(__file__).parent / "feff_configs"
+        preset_file = preset_dir / f"{preset}.yaml"
 
-# Fourier Transform parameters
-kmin: {config.kmin}
-kmax: {config.kmax}
-kweight: {config.kweight}
-dk: {config.dk}
-window: {config.window}
+        if not preset_file.exists():
+            console.print(f"[red]Error: Preset file not found: {preset_file}[/red]")
+            raise typer.Exit(1)
 
-# Processing options
-force_recalculate: false
-cleanup_feff_files: true
-parallel: true
-n_workers: null  # null = auto-detect
+        # Copy the preset file to the output location
+        import shutil
 
-# User FEFF tag settings (empty = use defaults)
-user_tag_settings: {{}}
+        shutil.copy2(preset_file, output_file)
 
-# Example custom FEFF parameters:
-# user_tag_settings:
-#   S02: "0.8"              # Amplitude reduction factor
-#   SCF: "5.0 0 30 0.1 1"   # Self-consistent field
-#   EXCHANGE: "0"           # Exchange correlation
-"""
-        output_file.write_text(yaml_content)
-        console.print(f"[green]✓ Configuration example created: {output_file}[/green]")
+        console.print(f"[green]✓ Configuration file created: {output_file}[/green]")
         console.print(f"  Based on '{preset}' preset")
+        console.print(
+            "  [dim]Edit this file to customize parameters for your analysis[/dim]"
+        )
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
