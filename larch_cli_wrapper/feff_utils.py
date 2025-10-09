@@ -2,11 +2,14 @@
 
 import json
 import logging
+import os
 import re
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from ase import Atoms
@@ -23,40 +26,54 @@ except ImportError:
 from larch.io import read_ascii
 from larch.xafs.feffrunner import feff8l
 
+logger = logging.getLogger("larch_wrapper")
+
 # Maximum number of absorber sites to process to avoid excessive computation
 LARGE_NUMBER_OF_SITES = 100
 
-# Configuration presets using pymatgen defaults
-PRESETS = {
-    "quick": {
-        "spectrum_type": "EXAFS",
-        "edge": "K",
-        "radius": 4.0,
-        "kmin": 2,
-        "kmax": 12,
-        "kweight": 2,
-        "window": "hanning",
-        "dk": 1.0,
-        "user_tag_settings": {
-            "EXCHANGE": 0,
-            "S02": 1.0,
-            "PRINT": "1 0 0 0 0 3",
-            "NLEG": 6,
-            "_del": ["COREHOLE", "COREHOLE FSR", "SCF"],
-        },
-    },
-    "publication": {
-        "spectrum_type": "EXAFS",
-        "edge": "K",
-        "radius": 8.0,
-        "kmin": 3,
-        "kmax": 18,
-        "kweight": 2,
-        "window": "hanning",
-        "dk": 4.0,
-        "user_tag_settings": {},  # Use pymatgen defaults
-    },
-}
+
+def _load_presets() -> dict[str, dict[str, Any]]:
+    """Load preset configurations from bundled YAML files.
+
+    Returns:
+        Dictionary mapping preset names to their configuration dictionaries.
+        Falls back to minimal defaults if YAML files cannot be loaded.
+    """
+    presets = {}
+    preset_dir = Path(__file__).parent / "feff_configs"
+
+    if not YAML_AVAILABLE:
+        logger.warning("PyYAML not available, using minimal default presets")
+        return {
+            "quick": {"spectrum_type": "EXAFS", "edge": "K", "radius": 4.0},
+            "publication": {"spectrum_type": "EXAFS", "edge": "K", "radius": 8.0},
+        }
+
+    if not preset_dir.exists():
+        logger.warning(f"Preset directory not found: {preset_dir}")
+        return {
+            "quick": {"spectrum_type": "EXAFS", "edge": "K", "radius": 4.0},
+            "publication": {"spectrum_type": "EXAFS", "edge": "K", "radius": 8.0},
+        }
+
+    # Load all YAML files in the preset directory
+    for yaml_file in preset_dir.glob("*.yaml"):
+        preset_name = yaml_file.stem
+        try:
+            with open(yaml_file) as f:
+                preset_config = yaml.safe_load(f)
+            if isinstance(preset_config, dict):
+                presets[preset_name] = preset_config
+                logger.debug(f"Loaded preset '{preset_name}' from {yaml_file}")
+            else:
+                logger.warning(f"Invalid preset format in {yaml_file}")
+        except (OSError, yaml.YAMLError) as e:
+            logger.warning(f"Failed to load preset from {yaml_file}: {e}")
+    return presets
+
+
+# Load presets from YAML files at module import time
+PRESETS = _load_presets()
 
 
 class SpectrumType(str, Enum):
@@ -119,20 +136,78 @@ __all__ = [
 # ================== CONFIGURATION ==================
 @dataclass
 class FeffConfig:
-    """Configuration class for FEFF calculations."""
+    """Configuration class for FEFF calculations.
+
+    FEFF input "cards" are represented via explicit fields on this class.
+    Values are written into feff.inp as space-separated strings. Prefer strings
+    for full control; numbers are accepted and normalized. Known tags and their
+    meanings:
+
+    - CONTROL ipot ixsph ifms ipaths igenfmt iff2x (Standard)
+        Run one or more FEFF program modules. 0 = skip, 1 = run. Modules must run
+        sequentially without skipping; e.g. "1 1 1 0 0 1" is invalid. Default is
+        "1 1 1 1 1 1" (run all). Sub-groups: ipot -> atomic/pot/screen;
+        ifms -> fms/mkgtr; iff2x -> ff2x/sfconv/eels. LDOS is controlled by LDOS
+        card, not CONTROL.
+
+    - PRINT ppot pxsph pfms ppaths pgenfmt pff2x (Standard)
+        Control print levels (output files) per module. Default is 0 for each.
+
+    - EDGE label s02 (Standard)
+        Set the edge by label (K, L1, L2, L3, ...). For very shallow edges (M and
+        higher), results are less tested. You may also specify an amplitude
+        reduction factor S02 here. In this project, prefer FeffConfig.edge for the
+        edge selection and use the S02 card for S02 itself for clarity.
+
+    - SCF rfms1 [lfms1 nscmt ca nmix] (Standard)
+        Control self-consistent potentials. Accepts 1–5 tokens
+        (rfms1[, lfms1[, nscmt[, ca[, nmix]]]]). Defaults for omitted tokens:
+        lfms1=0 (solids), nscmt=30, ca=0.2, nmix=1. rfms1 is the radius (Å) for
+        full multiple scattering during SCF; typically ~30 atoms. lfms1=1 is for
+        molecules. nscmt is max iterations; ca is initial mixing; nmix number of
+        mixing iterations before Broyden.
+
+    - S02 s02 (Standard)
+        Amplitude reduction factor S02. If < 0.1, FEFF estimates it from atomic overlap
+        integrals. Typically between 0.8 and 1.0. Using this card is clearer than using
+        EDGE label s02.
+
+    - EXCHANGE ixc vr0 vi0 [ixc0] (Useful)
+        Exchange-correlation model selection and constant shifts: ixc selects the
+        model, optional ixc0 for background; vr0 is a Fermi level shift (eV);
+        vi0 is an imaginary optical potential (broadening). Defaults: ixc=0
+        (Hedin–Lundqvist), vr0=0.0, vi0=0.0.
+
+    - NLEG nleg (Useful)
+        Maximum number of legs per scattering path. nleg=2 limits to single scattering.
+        Default is 8.
+
+    Normalization rules (enforced by set_tag/apply_tags):
+        - Tokens are serialized to strings separated by spaces.
+        - S02: float >= 0
+        - EXAFS: positive integer
+        - PRINT/CONTROL: sequences of integers
+        - SCF: 1 or 5 numeric tokens; defaults applied when omitted
+        - EXCHANGE: free-form tokens (commonly integers/floats), joined
+        - NLEG: positive integer
+        - Unknown tags: tokens are joined as-is
+    """
 
     spectrum_type: str = "EXAFS"
     edge: str = "K"
     radius: float = 4.0  # cluster size (quick preset default)
-    user_tag_settings: dict[str, str] = field(
-        default_factory=lambda: {
-            "EXCHANGE": "0",
-            "S02": "1.0",
-            "PRINT": "1 0 0 0 0 3",
-            "NLEG": "6",
-            "_del": ["COREHOLE", "COREHOLE FSR", "SCF"],
-        }
-    )  # Quick preset defaults
+    # Explicit FEFF card fields. Values accept strings, numbers, or sequences and
+    # will be normalized.
+    control: Any | None = None
+    print: Any | None = "1 0 0 0 0 3"
+    s02: Any | None = 1.0
+    scf: Any | None = None
+    exchange: Any | None = 0
+    nleg: Any | None = 6
+    exafs: Any | None = None
+    delete_tags: list[str] | str | None = (
+        None  # Additional tags to delete (COREHOLE tags always deleted automatically)
+    )
     # FFT parameters for EXAFS transform:
     kmin: float = 2.0  # starting k for FT Window
     kmax: float = 12.0  # ending k for FT Window (quick preset default)
@@ -179,19 +254,23 @@ class FeffConfig:
         return {k: v for k, v in params.items() if v is not None}
 
     @property
-    def feff_params(self) -> dict[str, str | float | dict[str, str]]:
+    def feff_params(self) -> dict[str, str | float | dict[str, str | list[str]]]:
         """Return FEFF calculation parameters as a dictionary.
 
         These are the parameters that affect the FEFF calculation itself,
         not the analysis/Fourier transform parameters. Used for caching
         to determine when FEFF calculations need to be re-run.
         """
-        return {
+        params: dict[str, str | float | dict[str, str | list[str]]] = {
             "spectrum_type": self.spectrum_type,
             "edge": self.edge,
             "radius": self.radius,
-            "user_tag_settings": self.user_tag_settings,
         }
+        # Include a stable representation of FEFF cards for cache keys
+        cards = self.to_pymatgen_user_tags()
+        if cards:
+            params.update(cards)
+        return params
 
     def __post_init__(self) -> None:
         """Post-initialization validation of configuration parameters."""
@@ -246,14 +325,18 @@ class FeffConfig:
 
     @classmethod
     def from_yaml(cls, yaml_path: Path) -> "FeffConfig":
-        """Load configuration from a YAML file."""
+        """Load configuration from a YAML file.
+
+        Expects keys to match FeffConfig field names directly
+        (e.g., control, print, s02, scf, exchange, nleg, exafs, delete_tags).
+        """
         if not YAML_AVAILABLE:
             raise ImportError("PyYAML required for configuration files")
         with open(yaml_path) as f:
             params = yaml.safe_load(f)
         if not isinstance(params, dict):
             raise ValueError("YAML file must contain a dictionary")
-        return cls(**params)
+        return cls(**params)  # type: ignore[arg-type]
 
     def to_yaml(self, yaml_path: Path) -> None:
         """Save configuration to a YAML file."""
@@ -263,32 +346,207 @@ class FeffConfig:
             yaml.dump(self.as_dict(), f)
 
     def as_dict(self) -> dict[str, object]:
-        """Convert configuration to dictionary format."""
-        return {
-            "spectrum_type": self.spectrum_type,
-            "edge": self.edge,
-            "radius": self.radius,
-            "user_tag_settings": self.user_tag_settings,
-            "kmin": self.kmin,
-            "kmax": self.kmax,
-            "kweight": self.kweight,
-            "dk": self.dk,
-            "dk2": self.dk2,
-            "with_phase": self.with_phase,
-            "rmax_out": self.rmax_out,
-            "window": self.window,
-            "nfft": self.nfft,
-            "kstep": self.kstep,
-            "parallel": self.parallel,
-            "n_workers": self.n_workers,
-            "sample_interval": self.sample_interval,
-            "force_recalculate": self.force_recalculate,
-            "cleanup_feff_files": self.cleanup_feff_files,
-        }
+        """Convert configuration to dictionary format.
+
+        This representation combines FEFF parameters (used for caching/input
+        generation) with Fourier transform parameters, plus execution flags.
+        It leverages the dedicated helpers ``feff_params`` and
+        ``fourier_params`` to keep serialization consistent across the codebase.
+        """
+        data: dict[str, object] = {}
+
+        # Core FEFF calculation parameters (includes spectrum_type, edge, radius
+        # and a stable feff_cards representation when applicable)
+        data.update(self.feff_params)
+
+        # Fourier-transform and output parameters (only include non-None)
+        data.update(self.fourier_params)
+
+        # Execution / runtime flags
+        data.update(
+            {
+                "parallel": self.parallel,
+                "n_workers": self.n_workers,
+                "sample_interval": self.sample_interval,
+                "force_recalculate": self.force_recalculate,
+                "cleanup_feff_files": self.cleanup_feff_files,
+            }
+        )
+
+        return data
 
     def __repr_json__(self) -> str:
         """JSON representation for interactive environments."""
         return json.dumps(self.as_dict(), indent=4)
+
+    def to_pymatgen_user_tags(self) -> dict[str, str | list[str]]:
+        """Build the FEFF card dict for pymatgen from explicit fields only.
+
+        All values are normalized to FEFF string format.
+        Returns a dict suitable for MPEXAFSSet(user_tag_settings=...).
+        """
+        tags: dict[str, str | list[str]] = {}
+
+        field_map: dict[str, Any] = {
+            "CONTROL": self.control,
+            "PRINT": self.print,
+            "S02": self.s02,
+            "SCF": self.scf,
+            "EXCHANGE": self.exchange,
+            "NLEG": self.nleg,
+            "EXAFS": self.exafs,
+        }
+
+        # Add normalized explicit fields
+        for key, val in field_map.items():
+            if val is not None:
+                tags[key] = self._normalize_tag(key, val)
+
+        # Build deletion list combining explicit delete_tags and legacy _del
+        del_list: list[str] = []
+        if self.delete_tags:
+            if isinstance(self.delete_tags, str):
+                del_list.append(self.delete_tags)
+            else:
+                del_list.extend([str(x) for x in self.delete_tags])
+
+        # Deduplicate preserving order
+        if del_list:
+            seen: set[str] = set()
+            uniq: list[str] = []
+            for x in del_list:
+                if x not in seen:
+                    seen.add(x)
+                    uniq.append(x)
+            tags["_del"] = uniq
+
+        return tags
+
+    # -------- Normalization helpers ---------
+    @staticmethod
+    def _to_str_tokens(value: Any) -> list[str]:
+        """Convert a scalar or sequence to list[str] tokens for FEFF lines."""
+        if isinstance(value, list | tuple):
+            return [str(x) for x in value]
+        elif isinstance(value, str):
+            # Split by whitespace to tokens; keep as-is if already a single token
+            return value.split()
+        else:
+            return [str(value)]
+
+    def _normalize_tag(self, name: str, value: Any) -> str:
+        """Normalize a tag value to a valid FEFF string.
+
+        With validation for known tags.
+        """
+        key = name.strip().upper()
+        tokens = self._to_str_tokens(value)
+
+        # Known tag rules
+        if key == "S02":
+            # amplitude reduction factor; allow float >= 0
+            try:
+                s02 = float(tokens[0])
+            except Exception as e:
+                raise ValueError(f"S02 must be a number, got {value!r}") from e
+            if s02 < 0:
+                raise ValueError(f"S02 must be >= 0, got {s02}")
+            return f"{s02}"
+
+        if key == "EXAFS":
+            # Number of k-points in EXAFS output or a control parameter;
+            # expect a positive integer
+            try:
+                exafs = int(float(tokens[0]))
+            except Exception as e:
+                raise ValueError(f"EXAFS must be an integer, got {value!r}") from e
+            if exafs <= 0:
+                raise ValueError(f"EXAFS must be > 0, got {exafs}")
+            return str(exafs)
+
+        if key == "PRINT":
+            # sequence of integers
+            try:
+                ints = [str(int(float(t))) for t in tokens]
+            except Exception as e:
+                raise ValueError(f"PRINT expects integer tokens, got {value!r}") from e
+            return " ".join(ints)
+
+        if key == "CONTROL":
+            # sequence of integers (feature toggles)
+            try:
+                ints = [str(int(float(t))) for t in tokens]
+            except Exception as e:
+                raise ValueError(
+                    f"CONTROL expects integer tokens, got {value!r}"
+                ) from e
+            return " ".join(ints)
+
+        if key == "SCF":
+            # Accept 1–5 tokens. Defaults for optional fields if omitted.
+            # SCF rfms1 [lfms1 nscmt ca nmix]
+            if len(tokens) < 1 or len(tokens) > 5:
+                raise ValueError(
+                    f"SCF expects between 1 and 5 tokens, got {len(tokens)}: {value!r}"
+                )
+            try:
+                # rfms1: positive float (radius)
+                rfms1 = float(tokens[0])
+                if rfms1 <= 0:
+                    raise ValueError(f"SCF rfms1 must be > 0, got {rfms1}")
+
+                # Fill trailing with defaults
+                lfms1 = int(float(tokens[1])) if len(tokens) >= 2 else 0
+                nscmt = int(float(tokens[2])) if len(tokens) >= 3 else 30
+                ca = float(tokens[3]) if len(tokens) >= 4 else 0.2
+                nmix = int(float(tokens[4])) if len(tokens) >= 5 else 1
+
+                # Validate ranges
+                if lfms1 not in (0, 1):
+                    raise ValueError(
+                        f"SCF lfms1 must be 0 (solid) or 1 (molecule), got {lfms1}"
+                    )
+                if nscmt < 0:
+                    raise ValueError(f"SCF nscmt must be >= 0, got {nscmt}")
+                if ca <= 0 or ca > 1.0:
+                    raise ValueError(f"SCF ca must be in (0, 1], got {ca}")
+                if not (1 <= nmix <= 30):
+                    raise ValueError(f"SCF nmix must be between 1 and 30, got {nmix}")
+
+                # Format numbers compactly
+                def _fmt(x: float) -> str:
+                    s = str(float(x))
+                    return s.rstrip("0").rstrip(".") if "." in s else str(int(float(x)))
+
+                out = [
+                    _fmt(rfms1),
+                    str(int(lfms1)),
+                    str(int(nscmt)),
+                    _fmt(ca),
+                    str(int(nmix)),
+                ]
+            except Exception as e:
+                # If parsing above raised a ValueError, re-raise. Otherwise wrap.
+                if isinstance(e, ValueError):
+                    raise
+                raise ValueError(f"Invalid SCF specification: {value!r}") from e
+            return " ".join(out)
+
+        if key == "EXCHANGE":
+            # Often an integer code or string; accept as-is tokens joined
+            return " ".join(tokens)
+
+        if key == "NLEG":
+            try:
+                nleg = int(float(tokens[0]))
+            except Exception as e:
+                raise ValueError(f"NLEG must be an integer, got {value!r}") from e
+            if nleg <= 0:
+                raise ValueError(f"NLEG must be > 0, got {nleg}")
+            return str(nleg)
+
+        # Fallback: join tokens with spaces
+        return " ".join(tokens)
 
 
 def validate_absorber(atoms: Atoms, absorber: str | int) -> str:
@@ -434,7 +692,6 @@ def validate_absorber_indices(atoms: Atoms, absorber_indices: list[int]) -> str:
 
     # Log warning if too many sites
     if len(absorber_indices) > LARGE_NUMBER_OF_SITES:
-        logger = logging.getLogger(__name__)
         logger.warning(
             f"Number of absorber sites ({len(absorber_indices)}) "
             f"is very large - are you sure this is correct? "
@@ -538,7 +795,6 @@ def generate_pymatgen_input(
         absorber_index: Index of the absorbing atom (0-based)
         output_dir: Directory where FEFF input files will be written
         config: FEFF configuration object
-
     Returns:
         Path to the generated feff.inp file
     """
@@ -548,41 +804,44 @@ def generate_pymatgen_input(
             f"Absorber index {absorber_index} out of range (0-{len(atoms) - 1})"
         )
 
+    logger.debug(f"Generating FEFF input for absorber index {absorber_index}")
+
     # Convert to pymatgen structure
     adaptor = AseAtomsAdaptor()
     structure = adaptor.get_structure(atoms)
 
     # Create FEFF set with user settings
-    user_settings = config.user_tag_settings.copy()
-
-    # Apply radius setting
+    user_settings = config.to_pymatgen_user_tags()
     user_settings["RPATH"] = str(config.radius)
 
-    # Remove problematic settings for FEFF8L compatibility
-    user_settings.pop("COREHOLE", None)
+    logger.debug(f"RPATH set to {config.radius}")
 
-    # Ensure _del is a list for removing incompatible keywords
-    if "_del" not in user_settings:
+    # Handle _del keyword for removing incompatible tags
+    del_value = user_settings.pop("_del", None)
+    if del_value is None:
         del_list: list[str] = []
+    elif isinstance(del_value, str):
+        del_list = [del_value]
+    elif isinstance(del_value, list):
+        del_list = del_value
     else:
-        del_value = user_settings["_del"]
-        if isinstance(del_value, str):
-            del_list = [del_value]
-        elif isinstance(del_value, list):
-            del_list = del_value
-        else:
-            raise ValueError("_del must be a string or list of strings")
-
-    user_settings["_del"] = del_list  # type: ignore[assignment]
+        raise ValueError("_del must be a string or list of strings")
 
     # Add FEFF8L incompatible keywords to the deletion list
     incompatible_keywords = ["COREHOLE", "COREHOLE FSR"]
     for keyword in incompatible_keywords:
         if keyword not in del_list:
             del_list.append(keyword)
+            logger.debug(f"Added {keyword} to deletion list for FEFF8L compatibility")
+
+    user_settings["_del"] = del_list
 
     # Create FEFF set
     if config.spectrum_type == "EXAFS":
+        logger.debug(
+            "Creating EXAFS FEFF set with "
+            f"edge {config.edge} and radius {config.radius}"
+        )
         feff_set = MPEXAFSSet(
             absorbing_atom=absorber_index,
             structure=structure,
@@ -593,9 +852,25 @@ def generate_pymatgen_input(
     else:
         raise ValueError(f"Unsupported spectrum type: {config.spectrum_type}")
 
-    output_dir = Path(output_dir)
+    # Always use absolute output_dir to avoid relative path issues
+    output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    feff_set.write_input(str(output_dir))
+    logger.debug(f"Output directory created: {output_dir}")
+
+    # Some external writers may change the process CWD. Guard and restore.
+    original_cwd = os.getcwd()
+    try:
+        logger.info(f"Writing FEFF input to {output_dir}")
+        feff_set.write_input(str(output_dir))
+        logger.info("FEFF input generated successfully")
+    finally:
+        try:
+            os.chdir(original_cwd)
+        except OSError as e:
+            # Best-effort restore; directory may have been deleted
+            logger.warning(
+                f"Failed to restore working directory to {original_cwd}: {e}"
+            )
 
     return output_dir / "feff.inp"
 
@@ -605,7 +880,7 @@ def run_multi_site_feff_calculations(
     cleanup: bool = True,
     parallel: bool = True,
     max_workers: int | None = None,
-    progress_callback: callable = None,
+    progress_callback: Callable = None,
     timeout: int = 600,
     max_retries: int = 2,
     force_recalculate: bool = False,
@@ -667,8 +942,6 @@ def run_multi_site_feff_calculations(
     if parallel and len(input_files) > 1:
         if max_workers is None:
             # More conservative default: use fewer workers to reduce resource contention
-            import os
-
             cpu_count = os.cpu_count() or 4
             max_workers = min(len(input_files), max(1, cpu_count // 2), 3)
 
@@ -729,13 +1002,9 @@ def generate_multi_site_feff_inputs(
     Returns:
         List of paths to generated feff.inp files
     """
-    if not absorber_indices:
-        raise ValueError("At least one absorber index must be provided")
-
-    # Validate all indices
-    for idx in absorber_indices:
-        if not 0 <= idx < len(atoms):
-            raise ValueError(f"Absorber index {idx} out of range (0-{len(atoms) - 1})")
+    # Reuse common validation (ensures indices are valid
+    # and correspond to the same element)
+    _ = validate_absorber_indices(atoms, absorber_indices)
 
     base_output_dir = Path(base_output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
@@ -789,7 +1058,6 @@ def run_feff_calculation(
     Returns:
         True if calculation succeeded, False otherwise
     """
-    import os
     import shutil
     import subprocess
     import sys
@@ -970,8 +1238,6 @@ def cleanup_feff_output(feff_dir: Path, keep_essential: bool = True) -> int:
     Returns:
         Number of files removed
     """
-    logger = logging.getLogger("larch_wrapper")
-
     feff_dir = Path(feff_dir)
     if not feff_dir.exists():
         return 0
@@ -1033,8 +1299,6 @@ def read_feff_output(feff_dir: Path) -> tuple[np.ndarray, np.ndarray]:
 
         # FEFF format: reconstruct complex chi from mag and phase if available
         if hasattr(feff_data, "mag") and hasattr(feff_data, "phase"):
-            import numpy as np
-
             chi = feff_data.mag * np.exp(1j * feff_data.phase)
             return chi, feff_data.k
 
