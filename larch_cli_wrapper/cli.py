@@ -647,8 +647,10 @@ def analyze_feff_outputs(
         "--plot-include",
         help=(
             "Comma-separated list of plot components to include. "
-            "Options: 'individual' (individual spectra), 'average' (overall average), "
-            "'frames' (frame averages), 'sites' (site averages) and 'all' "
+            "Options: 'individual' (individual spectra), "
+            "'average' (overall average across frames & sites), "
+            "'frames' (one curve per frame; averaged over sites if needed), "
+            "'sites' (one curve per site; averaged over frames) and 'all' "
             "(all components present). "
             "Examples: 'average', 'average,frames', 'individual,average,sites' "
             "Default is 'all'."
