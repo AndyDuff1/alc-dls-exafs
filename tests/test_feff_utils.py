@@ -193,7 +193,8 @@ class TestFeffConfig:
             spectrum_type="EXAFS",
             edge="L3",
             radius=6.0,
-            user_tag_settings={"TEST": "value"},
+            print="1 0 0 0 0 3",
+            s02=0.9,
         )
         params = config.feff_params
 
@@ -201,7 +202,10 @@ class TestFeffConfig:
         assert params["spectrum_type"] == "EXAFS"
         assert params["edge"] == "L3"
         assert params["radius"] == 6.0
-        assert params["user_tag_settings"] == {"TEST": "value"}
+        assert "PRINT" in params
+        assert "S02" in params
+        assert params["PRINT"] == "1 0 0 0 0 3"
+        assert params["S02"] == "0.9"
 
     def test_from_preset(self):
         """Test creation from preset."""
