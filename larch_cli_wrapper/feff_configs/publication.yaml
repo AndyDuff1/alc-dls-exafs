@@ -1,0 +1,26 @@
+# EXAFS Configuration (more "tight" settings suitable for publication)
+# Larger cluster and extended k-range compared to quick.yaml
+spectrum_type: EXAFS
+edge: K
+radius: 8.0
+
+# FEFF cards (optional; leave as defaults where appropriate)
+control: "1 1 1 1 1 1"
+print: "1 0 0 0 0 3"
+s02: 0.0              # Amplitude reduction factor (let fitting refine later)
+scf: "4.5 0 30 .2 1" # Self-consistent field (defaults are generally robust)
+exchange: 0           # Exchange correlation model (Hedin–Lundqvist)
+exafs: 20
+
+# Fourier Transform parameters (tighter / more extended range)
+kmin: 3
+kmax: 18
+kweight: 2
+dk: 4.0
+window: hanning
+
+# Processing options
+force_recalculate: false
+cleanup_feff_files: true
+parallel: true
+n_workers: null  # null = auto-detect

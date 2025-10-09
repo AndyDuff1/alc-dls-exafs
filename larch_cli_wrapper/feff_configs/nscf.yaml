@@ -1,4 +1,7 @@
-# EXAFS Configuration (based on 'quick' preset)
+# EXAFS Non-self-consistent calculation
+
+
+# Basic params
 spectrum_type: EXAFS
 edge: K
 radius: 4.0
@@ -7,9 +10,12 @@ radius: 4.0
 control: "1 1 1 1 1 1"
 print: "1 0 0 0 0 3"
 s02: 0.0              # Amplitude reduction factor
-scf: "4.5 0 30 .2 1" # Self-consistent field
 exchange: 0           # Exchange correlation
 exafs: 20
+
+# Delete SCF for non-self-consistent calculation
+delete_tags:
+  - SCF
 
 # Fourier Transform parameters
 kmin: 2
