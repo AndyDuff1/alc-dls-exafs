@@ -179,7 +179,7 @@ radius: 8.0
 
 # FEFF cards
 control: "1 1 1 1 1 1"
-s02: 0.0
+s02: 1.0
 scf: "4.5 0 30 .2 1"  # or null to disable SCF
 exchange: 0
 
