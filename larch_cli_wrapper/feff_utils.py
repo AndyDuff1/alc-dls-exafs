@@ -883,7 +883,6 @@ def run_multi_site_feff_calculations(
     progress_callback: Callable = None,
     timeout: int = 600,
     max_retries: int = 2,
-    force_recalculate: bool = False,
 ) -> list[tuple[Path, bool]]:
     """Run FEFF calculations for multiple sites efficiently.
 
@@ -897,7 +896,6 @@ def run_multi_site_feff_calculations(
         timeout: Timeout per calculation in seconds (default: 600 = 10 minutes)
         max_retries: Maximum number of retry attempts for failed calculations
             (default: 2)
-        force_recalculate: Whether to force recalculation even if chi.dat exists
 
     Returns:
         List of (feff_dir, success) tuples
@@ -916,7 +914,6 @@ def run_multi_site_feff_calculations(
                     verbose=False,
                     cleanup=cleanup,
                     timeout=timeout,
-                    force_recalculate=force_recalculate,
                 )
 
                 if success:
@@ -1044,7 +1041,6 @@ def run_feff_calculation(
     verbose: bool = False,
     cleanup: bool = True,
     timeout: int = 600,
-    force_recalculate: bool = False,
 ) -> bool:
     """Run FEFF calculation with robust encoding handling.
 
@@ -1053,7 +1049,6 @@ def run_feff_calculation(
         verbose: Whether to enable verbose output
         cleanup: Whether to clean up unnecessary output files
         timeout: Timeout in seconds (default: 600 = 10 minutes)
-        force_recalculate: Whether to force recalculation even if chi.dat exists
 
     Returns:
         True if calculation succeeded, False otherwise
@@ -1069,28 +1064,6 @@ def run_feff_calculation(
 
     if not input_path.exists():
         raise FileNotFoundError(f"FEFF input file {input_path} not found")
-
-    # Check if chi.dat already exists and force_recalculate is False
-    if not force_recalculate and chi_file.exists():
-        # Verify the existing chi.dat file is valid
-        try:
-            # Use read_feff_output function from this module
-            read_feff_output(feff_dir)  # This will raise an exception if invalid
-
-            # Log that we're using existing results
-            with open(log_path, "w", encoding="utf-8", errors="replace") as log_file:
-                log_file.write(f"FEFF calculation skipped at {datetime.now()}\n")
-                log_file.write(f"Using existing chi.dat file: {chi_file}\n")
-                log_file.write("Use force_recalculate=True to override\n")
-
-            return True
-
-        except (OSError, ValueError, IndexError):
-            # Existing chi.dat is invalid, remove it and proceed with calculation
-            try:
-                chi_file.unlink()
-            except OSError:
-                pass  # Ignore errors removing invalid file
 
     try:
         # Create basic log

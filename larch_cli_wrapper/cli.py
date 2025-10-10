@@ -16,6 +16,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from . import DEFAULT_CACHE_DIR
 from .exafs_data import (
     EXAFSDataCollection,
     PlotConfig,
@@ -309,10 +310,9 @@ def parse_absorber_specification(absorber: str, atoms, all_sites: bool = False) 
 def show_info() -> None:
     """Show system and dependency information."""
     # Create processor with default cache to show diagnostics
-    cache_dir = Path.home() / ".exafs_cache"
     processor = PipelineProcessor(
         config=FeffConfig(),
-        cache_dir=cache_dir,
+        cache_dir=DEFAULT_CACHE_DIR,
     )
     diagnostics = processor.get_diagnostics()
 
@@ -434,12 +434,10 @@ def generate_feff_inputs(
             f"[cyan]Generating FEFF inputs for {absorber_spec['description']}...[/cyan]"
         )
 
-        # Use default cache directory if not specified
-        cache_dir = Path.home() / ".exafs_cache"
-
+        # Use default cache directory for consistency
         processor = PipelineProcessor(
             config=config,
-            cache_dir=cache_dir,  # Cache setup for consistency
+            cache_dir=DEFAULT_CACHE_DIR,
         )
 
         if all_frames and len(structures) > 1:
@@ -573,7 +571,7 @@ def run_feff(
 
         # Use default cache directory if not specified
         if cache_dir is None:
-            cache_dir = Path.home() / ".exafs_cache"
+            cache_dir = DEFAULT_CACHE_DIR
 
         # Create batch and execute using PipelineProcessor with caching
         # Use first task's parent directory as output_dir for batch
@@ -1160,7 +1158,7 @@ def run_full_pipeline(
 
         # Use default cache directory if not specified
         if cache_dir is None:
-            cache_dir = Path.home() / ".exafs_cache"
+            cache_dir = DEFAULT_CACHE_DIR
 
         # The config object returned by update_config_from_cli_options
         # is already a FeffConfig
@@ -1366,7 +1364,7 @@ def manage_cache(
         raise typer.Exit(1)
 
     try:
-        cache_path = cache_dir or Path.home() / ".exafs_cache"
+        cache_path = cache_dir or DEFAULT_CACHE_DIR
         processor = PipelineProcessor(
             config=FeffConfig(),
             cache_dir=cache_path,
