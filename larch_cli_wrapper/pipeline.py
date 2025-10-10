@@ -342,7 +342,6 @@ class FeffExecutor:
                 parallel=parallel,
                 max_workers=self.max_workers,
                 progress_callback=feff_progress_callback,
-                force_recalculate=self.force_recalculate,
             )
 
             # Update completed_tasks to final count (will be used for final processing)

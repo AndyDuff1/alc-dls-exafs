@@ -16,6 +16,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from . import DEFAULT_CACHE_DIR
 from .exafs_data import (
     EXAFSDataCollection,
     PlotConfig,
@@ -309,10 +310,9 @@ def parse_absorber_specification(absorber: str, atoms, all_sites: bool = False) 
 def show_info() -> None:
     """Show system and dependency information."""
     # Create processor with default cache to show diagnostics
-    cache_dir = Path.home() / ".exafs_cache"
     processor = PipelineProcessor(
         config=FeffConfig(),
-        cache_dir=cache_dir,
+        cache_dir=DEFAULT_CACHE_DIR,
     )
     diagnostics = processor.get_diagnostics()
 
@@ -422,6 +422,10 @@ def generate_feff_inputs(
             structures = [structures]
         console.print(f"[dim]Loaded {len(structures)} frames from file[/dim]")
 
+        # Resolve output_dir to absolute path immediately
+        # to avoid issues with CWD changes
+        output_dir = output_dir.resolve()
+
         # Parse absorber specification using first structure as reference
         # Note this assumes that the indices are valid for all frames!
         absorber_spec = parse_absorber_specification(absorber, structures[0], all_sites)
@@ -430,12 +434,10 @@ def generate_feff_inputs(
             f"[cyan]Generating FEFF inputs for {absorber_spec['description']}...[/cyan]"
         )
 
-        # Use default cache directory if not specified
-        cache_dir = Path.home() / ".exafs_cache"
-
+        # Use default cache directory for consistency
         processor = PipelineProcessor(
             config=config,
-            cache_dir=cache_dir,  # Cache setup for consistency
+            cache_dir=DEFAULT_CACHE_DIR,
         )
 
         if all_frames and len(structures) > 1:
@@ -569,7 +571,7 @@ def run_feff(
 
         # Use default cache directory if not specified
         if cache_dir is None:
-            cache_dir = Path.home() / ".exafs_cache"
+            cache_dir = DEFAULT_CACHE_DIR
 
         # Create batch and execute using PipelineProcessor with caching
         # Use first task's parent directory as output_dir for batch
@@ -757,6 +759,10 @@ def analyze_feff_outputs(
             nfft=nfft,
             kstep=kstep,
         )
+
+        # Resolve output_dir to absolute path
+        # immediately to avoid issues with CWD changes
+        output_dir = output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         console.print(
@@ -1137,6 +1143,10 @@ def run_full_pipeline(
             atoms = [atoms]
         structures = atoms
         console.print(f"[dim]Loaded {len(structures)} frames from file[/dim]")
+
+        # Resolve output_dir to absolute path
+        # immediately to avoid issues with CWD changes
+        output_dir = output_dir.resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Use first structure for absorber parsing
@@ -1150,7 +1160,7 @@ def run_full_pipeline(
 
         # Use default cache directory if not specified
         if cache_dir is None:
-            cache_dir = Path.home() / ".exafs_cache"
+            cache_dir = DEFAULT_CACHE_DIR
 
         # The config object returned by update_config_from_cli_options
         # is already a FeffConfig
@@ -1356,7 +1366,7 @@ def manage_cache(
         raise typer.Exit(1)
 
     try:
-        cache_path = cache_dir or Path.home() / ".exafs_cache"
+        cache_path = cache_dir or DEFAULT_CACHE_DIR
         processor = PipelineProcessor(
             config=FeffConfig(),
             cache_dir=cache_path,
@@ -1398,43 +1408,35 @@ def create_config_example(
         "publication", "--preset", "-p", help=f"Base preset: {list(PRESETS.keys())}"
     ),
 ) -> None:
-    """Create an example configuration file."""
+    """Create an example configuration file by copying a preset.
+
+    This copies the preset YAML file to your specified location,
+    which you can then customize for your specific needs.
+    """
     if preset not in PRESETS:
         console.print(f"[red]Error: Unknown preset '{preset}'[/red]")
+        console.print(f"[dim]Available presets: {', '.join(PRESETS.keys())}[/dim]")
         raise typer.Exit(1)
 
     try:
-        config = FeffConfig.from_preset(preset)
-        yaml_content = f"""# EXAFS Configuration (based on '{preset}' preset)
-spectrum_type: {config.spectrum_type}
-edge: {config.edge}
-radius: {config.radius}
+        # Get the preset YAML file path
+        preset_dir = Path(__file__).parent / "feff_configs"
+        preset_file = preset_dir / f"{preset}.yaml"
 
-# Fourier Transform parameters
-kmin: {config.kmin}
-kmax: {config.kmax}
-kweight: {config.kweight}
-dk: {config.dk}
-window: {config.window}
+        if not preset_file.exists():
+            console.print(f"[red]Error: Preset file not found: {preset_file}[/red]")
+            raise typer.Exit(1)
 
-# Processing options
-force_recalculate: false
-cleanup_feff_files: true
-parallel: true
-n_workers: null  # null = auto-detect
+        # Copy the preset file to the output location
+        import shutil
 
-# User FEFF tag settings (empty = use defaults)
-user_tag_settings: {{}}
+        shutil.copy2(preset_file, output_file)
 
-# Example custom FEFF parameters:
-# user_tag_settings:
-#   S02: "0.8"              # Amplitude reduction factor
-#   SCF: "5.0 0 30 0.1 1"   # Self-consistent field
-#   EXCHANGE: "0"           # Exchange correlation
-"""
-        output_file.write_text(yaml_content)
-        console.print(f"[green]✓ Configuration example created: {output_file}[/green]")
+        console.print(f"[green]✓ Configuration file created: {output_file}[/green]")
         console.print(f"  Based on '{preset}' preset")
+        console.print(
+            "  [dim]Edit this file to customize parameters for your analysis[/dim]"
+        )
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")

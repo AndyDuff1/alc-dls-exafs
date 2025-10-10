@@ -69,6 +69,10 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "larch_cli_wrapper"
 module-root = ""
+source-include = [
+    "larch_cli_wrapper/feff_configs/*.yaml",
+    "larch_cli_wrapper/styles/*.mplstyle",
+]
 
 
 # =======================

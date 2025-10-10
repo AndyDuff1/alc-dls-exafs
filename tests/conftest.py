@@ -114,9 +114,8 @@ window: hanning
 dk: 1.0
 parallel: false
 force_recalculate: false
-user_tag_settings:
-  S02: "0.8"
-  SCF: "5.0 0 30 0.1 1"
+s02: 0.8
+scf: "5.0 0 30 0.1 1"
 """)
     return config_file
 

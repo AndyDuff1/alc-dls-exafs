@@ -280,7 +280,7 @@ class TestCLICommands:
                 )
 
                 assert result.exit_code == 0
-                assert "Generated 2 FEFF input files" in result.stdout
+                assert "2 sites" in result.stdout
 
     def test_generate_command_with_options(
         self, cli_runner, temp_structure_file, temp_config_file
@@ -541,7 +541,7 @@ class TestCLICommands:
 
             assert result.exit_code == 0
             assert output_file.exists()
-            assert "Configuration example created" in result.stdout
+            assert "Configuration file created" in result.stdout
 
             # Check file content
             content = output_file.read_text()

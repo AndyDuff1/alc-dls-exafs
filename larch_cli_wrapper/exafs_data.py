@@ -764,8 +764,6 @@ def prepare_exafs_data_collection(
 def _get_style_path(style: str) -> str | Path:
     """Get the path to a matplotlib style file."""
     if style in ["presentation", "publication"]:
-        from pathlib import Path
-
         current_dir = Path(__file__).parent
         style_file = current_dir / "styles" / f"exafs_{style}.mplstyle"
         if not style_file.exists():
@@ -969,9 +967,18 @@ def plot_exafs_matplotlib(
     filename_base: str = "EXAFS_FT",
     show_plot: bool = False,
 ) -> PlotResult:
-    """Plot EXAFS data using matplotlib."""
-    from pathlib import Path
+    """Plot EXAFS data using matplotlib.
 
+    Args:
+        collection: EXAFSDataCollection with spectra to plot
+        config: PlotConfig controlling what to plot and styling
+        output_dir: Output directory for saving plots (should be absolute path)
+        filename_base: Base name for output files
+        show_plot: Whether to display the plot interactively
+
+    Returns:
+        PlotResult with paths to saved plots
+    """
     import matplotlib.pyplot as plt
 
     # Get prepared data
@@ -1043,6 +1050,8 @@ def plot_exafs_matplotlib(
         # Save if output directory provided
         plot_paths = {}
         if output_dir:
+            # Convert to Path and ensure it exists
+            # Caller should provide absolute path to avoid CWD issues
             output_dir = Path(output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
 
