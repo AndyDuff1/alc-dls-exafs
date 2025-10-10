@@ -12,10 +12,7 @@ print: "1 0 0 0 0 3"
 s02: 0.0              # Amplitude reduction factor
 exchange: 0           # Exchange correlation
 exafs: 20
-
-# Delete SCF for non-self-consistent calculation
-delete_tags:
-  - SCF
+scf: null
 
 # Fourier Transform parameters
 kmin: 2

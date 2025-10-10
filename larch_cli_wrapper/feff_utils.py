@@ -31,6 +31,9 @@ logger = logging.getLogger("larch_wrapper")
 # Maximum number of absorber sites to process to avoid excessive computation
 LARGE_NUMBER_OF_SITES = 100
 
+# FEFF card fields that can be set to null in YAML to disable them
+FEFF_CARD_FIELDS = {"control", "print", "s02", "scf", "exchange", "nleg", "exafs"}
+
 
 def _load_presets() -> dict[str, dict[str, Any]]:
     """Load preset configurations from bundled YAML files.
@@ -63,6 +66,30 @@ def _load_presets() -> dict[str, dict[str, Any]]:
             with open(yaml_file) as f:
                 preset_config = yaml.safe_load(f)
             if isinstance(preset_config, dict):
+                # Handle FEFF card fields explicitly set to null
+                explicit_none_fields = [
+                    field.upper()
+                    for field in FEFF_CARD_FIELDS
+                    if field in preset_config and preset_config[field] is None
+                ]
+
+                # If there are fields explicitly set to None, add them to delete_tags
+                if explicit_none_fields:
+                    existing_delete_tags = preset_config.get("delete_tags", [])
+                    if isinstance(existing_delete_tags, str):
+                        existing_delete_tags = [existing_delete_tags]
+                    elif existing_delete_tags is None:
+                        existing_delete_tags = []
+                    else:
+                        existing_delete_tags = list(existing_delete_tags)
+
+                    # Add explicit None fields to delete list
+                    for field in explicit_none_fields:
+                        if field not in existing_delete_tags:
+                            existing_delete_tags.append(field)
+
+                    preset_config["delete_tags"] = existing_delete_tags
+
                 presets[preset_name] = preset_config
                 logger.debug(f"Loaded preset '{preset_name}' from {yaml_file}")
             else:
@@ -117,6 +144,7 @@ class WindowType(str, Enum):
 
 __all__ = [
     "LARGE_NUMBER_OF_SITES",
+    "FEFF_CARD_FIELDS",
     "PRESETS",
     "FeffConfig",
     "SpectrumType",
@@ -329,6 +357,9 @@ class FeffConfig:
 
         Expects keys to match FeffConfig field names directly
         (e.g., control, print, s02, scf, exchange, nleg, exafs, delete_tags).
+
+        Fields explicitly set to null in YAML will be added to delete_tags
+        to disable those FEFF cards.
         """
         if not YAML_AVAILABLE:
             raise ImportError("PyYAML required for configuration files")
@@ -336,6 +367,31 @@ class FeffConfig:
             params = yaml.safe_load(f)
         if not isinstance(params, dict):
             raise ValueError("YAML file must contain a dictionary")
+
+        # Track FEFF card fields that are explicitly set to None
+        explicit_none_fields = [
+            field.upper()
+            for field in FEFF_CARD_FIELDS
+            if field in params and params[field] is None
+        ]
+
+        # If there are fields explicitly set to None, add them to delete_tags
+        if explicit_none_fields:
+            existing_delete_tags = params.get("delete_tags", [])
+            if isinstance(existing_delete_tags, str):
+                existing_delete_tags = [existing_delete_tags]
+            elif existing_delete_tags is None:
+                existing_delete_tags = []
+            else:
+                existing_delete_tags = list(existing_delete_tags)
+
+            # Add explicit None fields to delete list
+            for field in explicit_none_fields:
+                if field not in existing_delete_tags:
+                    existing_delete_tags.append(field)
+
+            params["delete_tags"] = existing_delete_tags
+
         return cls(**params)  # type: ignore[arg-type]
 
     def to_yaml(self, yaml_path: Path) -> None:
@@ -397,12 +453,12 @@ class FeffConfig:
             "EXAFS": self.exafs,
         }
 
-        # Add normalized explicit fields
+        # Add normalized explicit fields (skip None values)
         for key, val in field_map.items():
             if val is not None:
                 tags[key] = self._normalize_tag(key, val)
 
-        # Build deletion list combining explicit delete_tags and legacy _del
+        # Build deletion list from explicit delete_tags
         del_list: list[str] = []
         if self.delete_tags:
             if isinstance(self.delete_tags, str):
