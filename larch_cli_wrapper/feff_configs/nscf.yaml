@@ -9,7 +9,7 @@ radius: 4.0
 # FEFF cards
 control: "1 1 1 1 1 1"
 print: "1 0 0 0 0 3"
-s02: 0.0              # Amplitude reduction factor
+s02: 1.0              # Amplitude reduction factor
 exchange: 0           # Exchange correlation
 exafs: 20
 scf: null
