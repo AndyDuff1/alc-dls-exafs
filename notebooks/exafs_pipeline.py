@@ -2,7 +2,7 @@
 
 import marimo
 
-__generated_with = "0.15.5"
+__generated_with = "0.16.5"
 app = marimo.App(width="medium", app_title="EXAFS Pipeline")
 
 
@@ -28,6 +28,7 @@ def _():
 
     # Package imports
     try:
+        from larch_cli_wrapper import DEFAULT_CACHE_DIR
         from larch_cli_wrapper.exafs_data import (
             PlotConfig,
             plot_exafs_plotly,
@@ -53,11 +54,10 @@ def _():
         )
 
     # Constants
-    CACHE_DIR = Path.home() / ".larch_cache"
     DEFAULT_OUTPUT_DIR = "outputs/exafs_pipeline"
     return (
         Atoms,
-        CACHE_DIR,
+        DEFAULT_CACHE_DIR,
         DEFAULT_OUTPUT_DIR,
         EdgeType,
         FeffConfig,
@@ -78,6 +78,30 @@ def _():
         traceback,
         view_atoms,
     )
+
+
+@app.cell
+def _(FeffConfig, mo):
+    # FEFF parameter presets (quick and publication)
+    quick_cfg = FeffConfig.from_preset("quick")
+    non_scf_cfg = FeffConfig.from_preset("nscf")
+    publication_cfg = FeffConfig.from_preset("publication")
+
+    presets = {
+        "Quick": quick_cfg,
+        "Non-SCF": non_scf_cfg,
+        "Publication": publication_cfg,
+    }
+    preset_dropdown = mo.ui.dropdown(
+        options=list(presets.keys()), value="Quick", label="FEFF Preset"
+    )
+    return preset_dropdown, presets
+
+
+@app.cell
+def _(preset_dropdown, presets):
+    selected_preset = presets[preset_dropdown.value]
+    return (selected_preset,)
 
 
 @app.cell(hide_code=True)
@@ -154,6 +178,20 @@ def _(mo, model_style, show_bonded_atoms, structure_list, v):
 
 
 @app.cell
+def _(mo, preset_dropdown):
+    # Display the preset selector above Stage A Input Generation form
+    mo.output.append(
+        mo.vstack(
+            [
+                mo.md("### FEFF Parameter Preset"),
+                preset_dropdown,
+            ]
+        )
+    )
+    return
+
+
+@app.cell
 def _(input_form, mo):
     mo.output.append(input_form)
     return
@@ -197,7 +235,14 @@ def _(mo, plot_output):
 
 
 @app.cell
-def _(EdgeType, mo, output_dir_ui, radius_input, species_list):
+def _(
+    EdgeType,
+    mo,
+    output_dir_ui,
+    radius_input,
+    selected_preset,
+    species_list,
+):
     # Stage A: Input Generation Form
     input_form = (
         mo.md(r"""
@@ -216,6 +261,16 @@ def _(EdgeType, mo, output_dir_ui, radius_input, species_list):
             background: var(--gray-1);
             border-radius: 0.5rem;
           }}
+        .advanced-panel summary {{
+            cursor: pointer;
+            font-weight: 600;
+        }}
+        .advanced-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 0.75rem;
+            padding: 0.5rem 0 0.75rem 0;
+        }}
         </style>
 
         **Input File Generation**
@@ -234,11 +289,23 @@ def _(EdgeType, mo, output_dir_ui, radius_input, species_list):
         </div>
 
         <div class="settings-grid">
-          {radius_input}
+          {radius}
           {output_dir_ui}
           {all_sites}
           {all_frames}
         </div>
+
+                <details class="advanced-panel">
+                    <summary>Advanced FEFF Tags</summary>
+          <div class="advanced-grid">
+            {control}
+            {print}
+            {s02}
+            {scf}
+            {exchange}
+            {exafs}
+          </div>
+        </details>
         """)
         .batch(
             # Main configuration
@@ -248,16 +315,77 @@ def _(EdgeType, mo, output_dir_ui, radius_input, species_list):
                 placeholder="e.g., 'Fe' or '0,1,2,3' for first 4 sites",
             ),
             edge=mo.ui.dropdown(
-                options=[e.name for e in EdgeType], value="K", label="Edge"
+                options=[e.name for e in EdgeType],
+                value=str(selected_preset.edge),
+                label="Edge",
             ),
             # Input generation parameters
-            radius_input=radius_input,
+            radius=radius_input,  # rename key to match FeffConfig
             output_dir_ui=output_dir_ui,
             all_sites=mo.ui.checkbox(
-                label="Process all sites of selected element", value=True
+                label="Process all sites of selected element", value=False
             ),
             all_frames=mo.ui.checkbox(
                 label="Process all frames (for trajectories)", value=True
+            ),
+            # Advanced FEFF tag inputs
+            # Use normalized FEFF strings from the selected preset when available
+            control=mo.ui.text(
+                label="CONTROL",
+                value=(
+                    selected_preset.to_pymatgen_user_tags().get(
+                        "CONTROL", "1 1 1 1 1 1"
+                    )
+                    if selected_preset
+                    else "1 1 1 1 1 1"
+                ),
+            ),
+            print=mo.ui.text(
+                label="PRINT",
+                value=(
+                    selected_preset.to_pymatgen_user_tags().get("PRINT", "1 0 0 0 0 3")
+                    if selected_preset
+                    else "1 0 0 0 0 3"
+                ),
+            ),
+            s02=mo.ui.text(
+                label="S02",
+                value=(
+                    str(selected_preset.to_pymatgen_user_tags().get("S02", "0.0"))
+                    if selected_preset
+                    else "0.0"
+                ),
+            ),
+            scf=mo.ui.text(
+                label="SCF (leave empty to run non-self-consistently)",
+                value=(
+                    # If preset has SCF disabled (scf is None), show empty string
+                    ""
+                    if selected_preset.scf is None
+                    else selected_preset.to_pymatgen_user_tags().get(
+                        "SCF", "4.5 0 30 .2 1"
+                    )
+                    if selected_preset
+                    else "4.5 0 30 .2 1"
+                ),
+                placeholder="e.g., 4.5 0 30 .2 1 (empty to disable SCF)",
+            ),
+            exchange=mo.ui.text(
+                label="EXCHANGE",
+                value=(
+                    selected_preset.to_pymatgen_user_tags().get("EXCHANGE", "0")
+                    if selected_preset
+                    else "0"
+                ),
+            ),
+            exafs=mo.ui.number(
+                label="EXAFS",
+                value=(
+                    int(float(selected_preset.to_pymatgen_user_tags().get("EXAFS", 20)))
+                    if selected_preset
+                    and selected_preset.to_pymatgen_user_tags().get("EXAFS") is not None
+                    else 20
+                ),
             ),
         )
         .form(submit_button_label="📝 Generate Input Files", bordered=True)
@@ -277,17 +405,17 @@ def _(enable_parallel, force_recalc_input, input_form, mo, num_workers):
         for the specific structures and sites from the previous step.
 
         <div class="settings-grid">
-          {enable_parallel}
-          {num_workers}
-          {force_recalc_input}
-          {cleanup_files}
+          {parallel}
+          {n_workers}
+          {force_recalculate}
+          {cleanup_feff_files}
         </div>
         """)
         .batch(
-            enable_parallel=enable_parallel,
-            num_workers=num_workers,
-            force_recalc_input=force_recalc_input,
-            cleanup_files=mo.ui.checkbox(
+            parallel=enable_parallel,  # renamed to match FeffConfig
+            n_workers=num_workers,  # renamed to match FeffConfig
+            force_recalculate=force_recalc_input,  # renamed to match FeffConfig
+            cleanup_feff_files=mo.ui.checkbox(  # renamed to match FeffConfig
                 label="Clean up intermediate files", value=True
             ),
         )
@@ -325,39 +453,20 @@ def _(dk_input, feff_form, k_weight, kmax_input, kmin_input, mo, window_type):
         plot type display.
 
         <div class="settings-grid">
-          {plot_mode}
-          {k_weight}
+          {kweight}
           {window_type}
-          {dk_input}
-          {kmin_input}
-          {kmax_input}
-          {show_plots}
-          {plot_style}
+          {dk}
+          {kmin}
+          {kmax}
         </div>
         """)
         .batch(
-            # Plot configuration
-            plot_mode=mo.ui.dropdown(
-                options={
-                    "Overall Average": "overall",
-                    "Frame Averages": "frames",
-                    "Site Averages": "sites",
-                },
-                value="Overall Average",
-                label="Plot Mode",
-            ),
-            plot_style=mo.ui.dropdown(
-                options={"Publication": "publication", "Presentation": "presentation"},
-                value="Publication",
-                label="Plot Style",
-            ),
-            show_plots=mo.ui.checkbox(label="Show interactive plots", value=True),
             # Fourier transform parameters
-            k_weight=k_weight,
+            kweight=k_weight,  # renamed to match FeffConfig
             window_type=window_type,
-            dk_input=dk_input,
-            kmin_input=kmin_input,
-            kmax_input=kmax_input,
+            dk=dk_input,  # renamed to match FeffConfig
+            kmin=kmin_input,  # renamed to match FeffConfig
+            kmax=kmax_input,  # renamed to match FeffConfig
         )
         .form(
             submit_button_label="📊 Analyze Results",
@@ -452,7 +561,7 @@ def _(ast, mo):
 
     def parse_kwargs_string(
         text: str, existing_kwargs: dict | None = None
-    ) -> tuple[dict, mo.md]:
+    ) -> tuple[dict, "object"]:
         """Safely parse user input as a dict.
 
         Accepts Python-style dicts (single or double quotes, True/False)
@@ -613,63 +722,51 @@ def _(mo, sampling_method):
 
 
 @app.cell
-def _(FeffConfig):
+def _(FeffConfig, selected_preset):
     def create_feff_config(settings):
-        """Create a FeffConfig object from the current UI settings.
+        """Overlay form settings onto preset using direct name matching.
 
-        Maps UI values to the appropriate FeffConfig fields.
-        Provides sensible defaults for missing parameters.
+        Form keys now match FeffConfig field names, so we just filter.
 
-        settings should be the result of form.value
+        Special handling for SCF: if the user provides an empty string,
+        set scf=None to disable it.
         """
-        return FeffConfig(
-            # Map radius from UI (FEFF calculation parameter)
-            radius=settings.get("radius_input", 4.0),
-            # Map FEFF analysis parameters (with defaults for missing values)
-            kmin=settings.get("kmin_input", 3.0),
-            kmax=settings.get("kmax_input", 12.0),
-            kweight=settings.get("k_weight", 2),
-            dk=settings.get("dk_input", 0.3),
-            window=settings.get("window_type", "hanning"),
-            # Map parallel settings (with defaults)
-            parallel=settings.get("enable_parallel", False),
-            n_workers=settings.get("num_workers", None),
-            # Map force recalculate setting (with default)
-            force_recalculate=settings.get("force_recalc_input", False),
-            # Map cleanup setting (with default)
-            cleanup_feff_files=settings.get("cleanup_feff_files", True),
-        )
+        from dataclasses import fields, replace
 
-    def update_config_from_settings(config, settings, setting_type="both"):
-        """Update an existing FeffConfig with parameters from settings.
+        base = selected_preset
+        if not settings:
+            return base
 
-        Args:
-            config: Existing FeffConfig to update
-            settings: Dictionary of settings from UI forms
-            setting_type: "feff", "analysis", or "both" to specify which
-                parameters to update
-        """
-        if setting_type in ("analysis", "both"):
-            # Analysis/Fourier transform parameters
-            config.kmin = settings.get("kmin_input", config.kmin)
-            config.kmax = settings.get("kmax_input", config.kmax)
-            config.kweight = settings.get("k_weight", config.kweight)
-            config.dk = settings.get("dk_input", config.dk)
-            config.window = settings.get("window_type", config.window)
+        feff_fields = {f.name for f in fields(FeffConfig)}
 
-        if setting_type in ("feff", "both"):
-            # FEFF calculation parameters
-            config.radius = settings.get("radius_input", config.radius)
-            config.parallel = settings.get("enable_parallel", config.parallel)
-            config.n_workers = settings.get("num_workers", config.n_workers)
-            config.force_recalculate = settings.get(
-                "force_recalc_input", config.force_recalculate
-            )
-            config.edge = settings.get("edge", getattr(config, "edge", "K"))
+        overrides = {}
+        for k, v in settings.items():
+            if k in feff_fields and v is not None:
+                # Special case: if scf is an empty string, user wants to disable it
+                if k == "scf" and isinstance(v, str) and v.strip() == "":
+                    overrides["scf"] = None
+                    # Ensure delete_tags includes SCF
+                    existing_delete_tags = (
+                        overrides.get("delete_tags") or base.delete_tags or []
+                    )
+                    if isinstance(existing_delete_tags, str):
+                        existing_delete_tags = [existing_delete_tags]
+                    else:
+                        existing_delete_tags = list(existing_delete_tags)
+                    if "SCF" not in existing_delete_tags:
+                        existing_delete_tags.append("SCF")
+                    overrides["delete_tags"] = existing_delete_tags
+                    continue
 
-        return config
+                # Skip other empty strings (but not for non-string fields)
+                if isinstance(v, str) and v.strip() == "":
+                    continue
 
-    return create_feff_config, update_config_from_settings
+                overrides[k] = v
+
+        return replace(base, **overrides) if overrides else base
+
+    return (create_feff_config,)
 
 
 @app.cell
@@ -687,7 +784,11 @@ def _(PipelineProcessor, mo, traceback):
                 remove_on_exit=True,
             ) as bar:
                 # Initialize PipelineProcessor with cache
-                processor = PipelineProcessor(config=config, cache_dir=cache_dir)
+                processor = PipelineProcessor(
+                    config=config,
+                    cache_dir=cache_dir,
+                    force_recalculate=config.force_recalculate,
+                )
                 bar.update(increment=20, subtitle="Initialized processor...")
 
                 # Parse absorber specification using first structure as reference
@@ -759,8 +860,12 @@ def _(PipelineProcessor, mo, traceback):
                 completion_title="✅ FEFF Execution Complete",
                 remove_on_exit=True,
             ) as bar:
-                # Initialize executor with cache
-                processor = PipelineProcessor(config=config, cache_dir=cache_dir)
+                # Initialize executor with cache and force_recalculate from config
+                processor = PipelineProcessor(
+                    config=config,
+                    cache_dir=cache_dir,
+                    force_recalculate=config.force_recalculate,
+                )
                 bar.update(increment=0, subtitle="Initialized executor...")
 
                 # Create progress callback for marimo progress bar
@@ -825,9 +930,6 @@ def _(PipelineProcessor, mo, traceback):
         batch,
         task_results,
         config,
-        plot_mode="overall",
-        show_plot=False,
-        plot_style="publication",
         cache_dir=None,
     ):
         """Stage C: Analyze results using PipelineProcessor."""
@@ -840,7 +942,11 @@ def _(PipelineProcessor, mo, traceback):
                 remove_on_exit=True,
             ) as bar:
                 # Initialize processor with cache
-                processor = PipelineProcessor(config=config, cache_dir=cache_dir)
+                processor = PipelineProcessor(
+                    config=config,
+                    cache_dir=cache_dir,
+                    force_recalculate=config.force_recalculate,
+                )
                 bar.update(increment=20, subtitle="Loading results...")
 
                 # Load successful results
@@ -885,7 +991,6 @@ def _(PipelineProcessor, mo, traceback):
                     - **Processed:** {n_successful} calculations from Stage B
                     - **Frames:** {n_frames}
                     - **Sites:** {n_sites}
-                    - **Plot mode:** {plot_mode}
                     - **k-weighting:** {config.kweight}
                     - **Source:** FEFF results from Stage B
 
@@ -909,13 +1014,16 @@ def _(PipelineProcessor, mo, traceback):
 
 
 @app.cell
-def _(WindowType, mo):
+def _(WindowType, mo, selected_preset):
     # Create individual UI elements first (these will be accessible)
     radius_input = mo.ui.number(
-        label="Radius (Å)", value=4.0, start=1.0
-    )  # temporary default 2.0
+        label="Radius (Å)",
+        value=float(getattr(selected_preset, "radius", 4.0)),
+        start=1.0,
+    )
     force_recalc_input = mo.ui.checkbox(
-        label="Force recalculate (ignore cache)", value=False
+        label="Force recalculate (ignore cache)",
+        value=bool(getattr(selected_preset, "force_recalculate", False)),
     )
     output_dir_ui = mo.ui.text(
         label="Output Directory",
@@ -923,15 +1031,36 @@ def _(WindowType, mo):
         placeholder="Directory for output files",
     )
 
-    k_weight = mo.ui.number(label="k-weight", value=2, start=0, step=1)
+    k_weight = mo.ui.number(
+        label="k-weight",
+        value=int(getattr(selected_preset, "kweight", 2)),
+        start=0,
+        step=1,
+        stop=3,
+    )
     window_type = mo.ui.dropdown(
         options=[w.value for w in WindowType],
-        value=WindowType.HANNING,
+        value=getattr(selected_preset, "window", WindowType.HANNING),
         label="Window type for FT",
     )
-    dk_input = mo.ui.number(label="dk (Å⁻¹)", value=0.3, start=0.1, step=0.1)
-    kmin_input = mo.ui.number(label="kmin (Å⁻¹)", value=3.0, start=0.0, step=0.1)
-    kmax_input = mo.ui.number(label="kmax (Å⁻¹)", value=12.0, start=0.1, step=0.1)
+    dk_input = mo.ui.number(
+        label="dk (Å⁻¹)",
+        value=float(getattr(selected_preset, "dk", 0.3)),
+        start=0.1,
+        step=0.1,
+    )
+    kmin_input = mo.ui.number(
+        label="kmin (Å⁻¹)",
+        value=float(getattr(selected_preset, "kmin", 3.0)),
+        start=0.0,
+        step=0.1,
+    )
+    kmax_input = mo.ui.number(
+        label="kmax (Å⁻¹)",
+        value=float(getattr(selected_preset, "kmax", 12.0)),
+        start=0.1,
+        step=0.1,
+    )
 
     # Plot control checkboxes
     show_individual_ui = mo.ui.checkbox(label="Show individual spectra", value=False)
@@ -940,8 +1069,14 @@ def _(WindowType, mo):
     show_site_averages_ui = mo.ui.checkbox(label="Show site averages", value=False)
     show_legend_ui = mo.ui.checkbox(label="Show legend", value=True)
 
-    enable_parallel = mo.ui.checkbox(label="Enable parallel processing", value=True)
-    num_workers = mo.ui.number(label="Number of workers (auto if blank)", value=None)
+    enable_parallel = mo.ui.checkbox(
+        label="Enable parallel processing",
+        value=bool(getattr(selected_preset, "parallel", True)),
+    )
+    num_workers = mo.ui.number(
+        label="Number of workers (auto if blank)",
+        value=getattr(selected_preset, "n_workers", None),
+    )
     return (
         dk_input,
         enable_parallel,
@@ -963,7 +1098,7 @@ def _(WindowType, mo):
 
 @app.cell
 def _(
-    CACHE_DIR,
+    DEFAULT_CACHE_DIR,
     DEFAULT_OUTPUT_DIR,
     Path,
     create_feff_config,
@@ -1000,7 +1135,7 @@ def _(
                 absorber=processing_absorber,
                 all_sites=all_sites,
                 all_frames=all_frames,
-                cache_dir=CACHE_DIR,
+                cache_dir=DEFAULT_CACHE_DIR,
             )
         except (OSError, ValueError, RuntimeError) as e:
             message = mo.md(f"""
@@ -1019,14 +1154,13 @@ def _(
 
 @app.cell
 def _(
-    CACHE_DIR,
+    DEFAULT_CACHE_DIR,
     create_feff_config,
     feff_form,
     input_result,
     mo,
     run_feff_execution_only,
     traceback,
-    update_config_from_settings,
 ):
     def run_feff_execution():
         """Stage B: Execute FEFF calculations on generated input files."""
@@ -1044,16 +1178,15 @@ def _(
 
         # Create configuration from settings
         config = create_feff_config(feff_settings)
-        config = update_config_from_settings(config, feff_settings, "feff")
 
-        parallel = feff_settings.get("enable_parallel", True)
+        parallel = feff_settings.get("parallel", True)
 
         try:
             message, result = run_feff_execution_only(
                 batch=input_result,  # FeffBatch from input generation
                 config=config,
                 parallel=parallel,
-                cache_dir=CACHE_DIR,
+                cache_dir=DEFAULT_CACHE_DIR,
             )
         except (OSError, ValueError, RuntimeError) as e:
             message = mo.md(f"""
@@ -1072,14 +1205,13 @@ def _(
 
 @app.cell
 def _(
-    CACHE_DIR,
+    DEFAULT_CACHE_DIR,
     analysis_form,
     create_feff_config,
     feff_result,
     mo,
     run_analysis_only,
     traceback,
-    update_config_from_settings,
 ):
     def run_analysis():
         """Stage C: Analyze FEFF results and create plots."""
@@ -1093,11 +1225,6 @@ def _(
 
         # Create configuration from settings
         config = create_feff_config(analysis_settings)
-        config = update_config_from_settings(config, analysis_settings, "analysis")
-
-        plot_mode = analysis_settings.get("plot_mode", "overall")
-        show_plot = analysis_settings.get("show_plots", True)
-        plot_style = analysis_settings.get("plot_style", "publication")
 
         # Extract batch and task_results from feff_result
         batch, task_results = feff_result
@@ -1107,10 +1234,7 @@ def _(
                 batch=batch,
                 task_results=task_results,
                 config=config,
-                plot_mode=plot_mode,
-                show_plot=show_plot,
-                plot_style=plot_style,
-                cache_dir=CACHE_DIR,
+                cache_dir=DEFAULT_CACHE_DIR,
             )
         except (OSError, ValueError, RuntimeError) as e:
             message = mo.md(f"""
@@ -1154,7 +1278,6 @@ def _(
     show_legend_ui,
     show_overall_average_ui,
     show_site_averages_ui,
-    update_config_from_settings,
 ):
     # Extract plot control settings
     show_individual = show_individual_ui.value
@@ -1168,16 +1291,14 @@ def _(
         result = analysis_result
         settings = analysis_settings
         message = analysis_message
-        # Create config with defaults and update with analysis parameters
-        config = create_feff_config({})
-        config = update_config_from_settings(config, settings, "analysis")
+        # Create config with analysis parameters
+        config = create_feff_config(settings)
     elif feff_result is not None:
         result = feff_result
         settings = feff_settings
         message = feff_message
-        # Create config with defaults and update with FEFF parameters
-        config = create_feff_config({})
-        config = update_config_from_settings(config, settings, "feff")
+        # Create config with FEFF parameters
+        config = create_feff_config(settings)
     else:
         result = None
         settings = {}
@@ -1260,11 +1381,13 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(CACHE_DIR, FeffConfig, PipelineProcessor, mo):
+def _(DEFAULT_CACHE_DIR, FeffConfig, PipelineProcessor, mo):
     def clear_cache(button_value=None):
         """Clear the cache directory using PipelineProcessor."""
         try:
-            processor = PipelineProcessor(config=FeffConfig(), cache_dir=CACHE_DIR)
+            processor = PipelineProcessor(
+                config=FeffConfig(), cache_dir=DEFAULT_CACHE_DIR
+            )
             files_cleared = processor.clear_cache()
             message = mo.md(
                 f"### 🗑️ Cache Cleared Successfully\n{files_cleared} files removed"
@@ -1279,7 +1402,9 @@ def _(CACHE_DIR, FeffConfig, PipelineProcessor, mo):
     def show_cache(button_value=None):
         """Show cache information using PipelineProcessor."""
         try:
-            processor = PipelineProcessor(config=FeffConfig(), cache_dir=CACHE_DIR)
+            processor = PipelineProcessor(
+                config=FeffConfig(), cache_dir=DEFAULT_CACHE_DIR
+            )
             info = processor.get_cache_info()
             message = mo.md(f"""
                         ### 📊 Cache Status
