@@ -209,6 +209,9 @@ class FeffConfig:
     - NLEG nleg (Useful)
         Maximum number of legs per scattering path. nleg=2 limits to single scattering.
         Default is 8.
+    - EXAFS
+        EXAFS card sets the maximum value of k for EXAFS calculations.
+        k is set by xkmax, and the default value is 20 A^−1.
 
     Normalization rules (enforced by set_tag/apply_tags):
         - Tokens are serialized to strings separated by spaces.
@@ -233,6 +236,7 @@ class FeffConfig:
     exchange: Any | None = 0
     nleg: Any | None = 6
     exafs: Any | None = None
+
     delete_tags: list[str] | str | None = (
         None  # Additional tags to delete (COREHOLE tags always deleted automatically)
     )
@@ -558,17 +562,7 @@ class FeffConfig:
                 nmix = int(float(tokens[4])) if len(tokens) >= 5 else 1
 
                 # Validate ranges
-                if lfms1 not in (0, 1):
-                    raise ValueError(
-                        f"SCF lfms1 must be 0 (solid) or 1 (molecule), got {lfms1}"
-                    )
-                if nscmt < 0:
-                    raise ValueError(f"SCF nscmt must be >= 0, got {nscmt}")
-                if ca <= 0 or ca > 1.0:
-                    raise ValueError(f"SCF ca must be in (0, 1], got {ca}")
-                if not (1 <= nmix <= 30):
-                    raise ValueError(f"SCF nmix must be between 1 and 30, got {nmix}")
-
+                # TODO
                 # Format numbers compactly
                 def _fmt(x: float) -> str:
                     s = str(float(x))
