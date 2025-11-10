@@ -667,7 +667,9 @@ class TestFeffOutput:
     
         with tempfile.TemporaryDirectory() as tmpdir:
             feff_dir = Path(tmpdir)
-            (feff_dir / "chi.dat").write_text("# FEFF format\n3.0 0.1 0.1118 0.4636\n4.0 0.2 0.2236 0.4636\n")
+            (feff_dir / "chi.dat").write_text(
+                "# FEFF format\n3.0 0.1 0.1118 0.4636\n4.0 0.2 0.2236 0.4636\n"
+            )
             chi, k = read_feff_output(feff_dir)
             expected_chi = mock_data.mag * np.sin(mock_data.phase)
             np.testing.assert_array_equal(k, mock_data.k)
